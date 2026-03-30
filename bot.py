@@ -43,22 +43,21 @@ def save_counter(count: int):
 
 async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = """Look at this screenshot.
+    prompt = """Look at this screenshot carefully.
 
-If it shows ANY Telegram interface with chats, contacts, or a share/forward screen — count any blue ticks or checkmarks you can see.
+You are verifying if someone has shared a Telegram link to 3 or more different chats.
 
 Respond ONLY with JSON:
 {"count": 3, "valid": true, "reason": "ok"}
 
 Rules:
-- If you can see 3 or more ticks/selections: count=3, valid=true
-- If you can see 2 ticks: count=2, valid=false
-- If you can see 1 tick: count=1, valid=false
-- If it shows Send (3) anywhere: count=3, valid=true
-- If it shows Send (2) anywhere: count=2, valid=false
-- If it shows Send (1) anywhere: count=1, valid=false
-- If it is clearly not Telegram at all: count=0, valid=false
-- If unsure about anything — default to count=3, valid=true"""
+- Only valid if you can CLEARLY see 3 or more chats selected with blue ticks
+- Only valid if Send (3) or higher is clearly visible
+- If you see Send (2): count=2, valid=false
+- If you see Send (1): count=1, valid=false
+- If unclear or can't confirm 3 shares: valid=false
+- If not Telegram at all: count=0, valid=false
+- Do NOT default to valid=true if unsure — default to valid=false"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -104,17 +103,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_name = update.effective_user.first_name or "there"
     counter = load_counter()
-    keyboard = [[InlineKeyboardButton("📤 Share Folder Link", url=f"https://t.me/share/url?url={FOLDER_LINK}")]]
+
+    keyboard = [[InlineKeyboardButton("📤 Share & Unlock Access", url=f"https://t.me/share/url?url={FOLDER_LINK}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        f"💎 VIP ACCESS VERIFICATION 💎\n\n"
-        f"👥 {counter} members have joined so far!\n\n"
-        f"Welcome {user_name}! You are one step away from exclusive access...\n\n"
-        f"To unlock your FREE VIP invite link:\n\n"
-        f"1️⃣ Tap the button below and share the folder link to 3 different Telegram channels or groups\n\n"
-        f"2️⃣ Screenshot your shares\n"
-        f"3️⃣ Send the screenshot here for verification\n\n"
-        f"⚡ Our AI verifies instantly!",
+        f"👑 STRICKLY VIP 👑\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔥 Welcome {user_name}!\n\n"
+        f"You've been selected for exclusive VIP access. "
+        f"Join {counter} members already inside! 💎\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🔐 HOW TO UNLOCK ACCESS\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"1️⃣ Tap the button below\n"
+        f"2️⃣ Share the link to 3 different Telegram groups or channels\n"
+        f"3️⃣ Send a screenshot as proof of your shares\n"
+        f"4️⃣ Our AI will verify instantly ⚡\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🎁 Your FREE VIP link is one step away... 🚀",
         reply_markup=reply_markup
     )
 
@@ -181,6 +188,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if "attempts" not in context.user_data:
+        context.user_data["attempts"] = 0
+
     processing_msg = await update.message.reply_text("🔍 Verifying your screenshot... please wait.")
 
     try:
@@ -199,6 +209,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_used_users(used_users)
             counter = load_counter() + 1
             save_counter(counter)
+            context.user_data["attempts"] = 0
+
             await processing_msg.edit_text(
                 f"✅ VERIFIED — VIP ACCESS GRANTED\n\n"
                 f"Congratulations {user_name}! Here is your personal invite link:\n\n"
@@ -206,6 +218,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"This link is yours only and expires after 1 use.\n"
                 f"Welcome to the VIP! 💎"
             )
+
             await context.bot.send_photo(
                 chat_id=ADMIN_ID,
                 photo=photo.file_id,
@@ -217,35 +230,61 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"👥 Total joined: {load_counter()}"
             )
 
-        elif count == 2:
-            await processing_msg.edit_text(
-                f"⚠️ So close {user_name}!\n\n"
-                f"You only shared to 2 chats — share 1 more time and send a new screenshot!"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 2 CHATS\n\n👤 {user_name} ({username})\n🆔 {user_id}\n📊 Only shared to 2 chats"
-            )
-
-        elif count == 1:
-            await processing_msg.edit_text(
-                f"⚠️ Not quite {user_name}!\n\n"
-                f"You only shared to 1 chat — share 2 more times and send a new screenshot!"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 1 CHAT\n\n👤 {user_name} ({username})\n🆔 {user_id}\n📊 Only shared to 1 chat"
-            )
-
         else:
-            await processing_msg.edit_text(
-                f"❌ Struggling to share the link {user_name}?\n\n"
-                f"Please contact Reggie for help!"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"❌ FAILED — INVALID SCREENSHOT\n\n👤 {user_name} ({username})\n🆔 {user_id}\n📊 No valid shares detected"
-            )
+            context.user_data["attempts"] += 1
+            attempts = context.user_data["attempts"]
+
+            if attempts >= 3:
+                await processing_msg.edit_text(
+                    f"❌ You have failed verification {attempts} times {user_name}.\n\n"
+                    f"Please contact an admin for help: @stricklyvip"
+                )
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"❌ FAILED 3+ TIMES\n\n"
+                         f"👤 {user_name} ({username})\n"
+                         f"🆔 {user_id}\n"
+                         f"📊 Shares detected: {count}"
+                )
+
+            elif count == 2:
+                await processing_msg.edit_text(
+                    f"⚠️ So close {user_name}!\n\n"
+                    f"You only shared to 2 chats — share 1 more and send a new screenshot!\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"⚠️ FAILED — 2 CHATS — ATTEMPT {attempts}\n\n"
+                         f"👤 {user_name} ({username})\n"
+                         f"🆔 {user_id}"
+                )
+
+            elif count == 1:
+                await processing_msg.edit_text(
+                    f"⚠️ Not quite {user_name}!\n\n"
+                    f"You only shared to 1 chat — share 2 more and send a new screenshot!\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"⚠️ FAILED — 1 CHAT — ATTEMPT {attempts}\n\n"
+                         f"👤 {user_name} ({username})\n"
+                         f"🆔 {user_id}"
+                )
+
+            else:
+                await processing_msg.edit_text(
+                    f"❌ Screenshot not valid {user_name}.\n\n"
+                    f"Please make sure you send a clear screenshot showing your shares.\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"❌ FAILED — INVALID — ATTEMPT {attempts}\n\n"
+                         f"👤 {user_name} ({username})\n"
+                         f"🆔 {user_id}"
+                )
 
     except Exception as e:
         logger.error(f"Error for user {user_id}: {e}")
